@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Smart Finance - แอปจัดการเงินอัจฉริยะ</title>
+    
+    <!-- โหลด Tailwind CSS เพื่อความสวยงาม -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- โหลด React และ ReactDOM -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    
+    <!-- โหลด Babel สำหรับคอมไพล์โค้ด React (JSX) ในเบราว์เซอร์ -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <!-- ตั้งค่าธีมสี Tailwind -->
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#0E5A5F', // สีเขียวเข้มหรูหรา
+                        secondary: '#C9A02C', // สีทอง
+                        bglight: '#F6F9F8',
+                    },
+                    fontFamily: {
+                        sans: ['"Segoe UI"', 'system-ui', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body { background-color: #F6F9F8; -webkit-tap-highlight-color: transparent; }
+        /* ซ่อน Scrollbar แต่ยังเลื่อนได้ */
+        ::-webkit-scrollbar { width: 0px; background: transparent; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useMemo } = React;
+
+        // --- ไอคอน SVG (Inline เพื่อความรวดเร็วและไม่ต้องพึ่งพาไฟล์นอก) ---
+        const WalletIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/><path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/><path d="M18 12a2 2 0 0 0 0 4h4v-4Z"/></svg>;
+        const TargetIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>;
+        const BillIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>;
+        const SendIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>;
+        const TrashIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>;
+
+        // --- ฟังก์ชันช่วยเหลือ (Formatters) ---
+        const formatMoney = (amount) => "฿" + amount.toLocaleString("th-TH");
+
+        function App() {
+            // 1. กำหนด State ทั้งหมดและดึงข้อมูลจาก LocalStorage (ถ้ามี)
+            const [isSetup, setIsSetup] = useState(() => JSON.parse(localStorage.getItem('sf_isSetup')) || false);
+            const [income, setIncome] = useState(() => parseFloat(localStorage.getItem('sf_income')) || 0);
+            const [savings, setSavings] = useState(() => parseFloat(localStorage.getItem('sf_savings')) || 0);
+            const [fixedBills, setFixedBills] = useState(() => parseFloat(localStorage.getItem('sf_fixedBills')) || 0);
+            const [transactions, setTransactions] = useState(() => JSON.parse(localStorage.getItem('sf_transactions')) || []);
+            
+            const [inputText, setInputText] = useState("");
+            const [hideBalances, setHideBalances] = useState(false);
+
+            // 2. ใช้ useEffect เพื่อเซฟข้อมูลลง LocalStorage ทุกครั้งที่มีการเปลี่ยนแปลง (Data Persistence)
+            useEffect(() => {
+                localStorage.setItem('sf_isSetup', JSON.stringify(isSetup));
+                localStorage.setItem('sf_income', income);
+                localStorage.setItem('sf_savings', savings);
+                localStorage.setItem('sf_fixedBills', fixedBills);
+                localStorage.setItem('sf_transactions', JSON.stringify(transactions));
+            }, [isSetup, income, savings, fixedBills, transactions]);
+
+            // 3. ระบบคำนวณเงิน Safe-to-Spend แบบ Real-time
+            const stats = useMemo(() => {
+                const totalSpent = transactions.reduce((sum, t) => sum + t.amount, 0);
+                
+                // หาจำนวนวันทั้งหมดในเดือนนี้ และวันที่เหลือ
+                const today = new Date();
+                const currentMonth = today.getMonth();
+                const currentYear = today.getFullYear();
+                const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
+                const currentDay = today.getDate();
+                const daysLeft = daysInMonth - currentDay + 1; // นับรวมวันนี้ด้วย
+
+                // คำนวณเงินคงเหลือหลังจากหักค่าใช้จ่ายคงที่และเงินออม
+                const remainingTotal = income - savings - fixedBills - totalSpent;
+                
+                // คาดคะเนเงินที่ใช้ได้ต่อวัน
+                const safeToSpend = remainingTotal / daysLeft;
+
+                return { totalSpent, remainingTotal, safeToSpend, daysLeft, currentDay, daysInMonth };
+            }, [income, savings, fixedBills, transactions]);
+
+            // 4. ฟังก์ชันบันทึกรายจ่ายด่วน (Smart Parsing)
+            const handleAddTransaction = (e) => {
+                e.preventDefault();
+                if (!inputText.trim()) return;
+
+                // ระบบวิเคราะห์ข้อความ (สกัดตัวเลขออกจากชื่อ)
+                // ตรวจจับตัวเลขที่อยู่ท้ายสุด หรือตัวเลขในประโยค
+                let amount = 0;
+                let title = inputText;
+                
+                // ใช้ Regex หาตัวเลข (รวมทศนิยม)
+                const amountMatch = inputText.match(/(\d+(\.\d+)?)/);
+                if (amountMatch) {
+                    amount = parseFloat(amountMatch[0]);
+                    // เอาตัวเลขออกจากข้อความเพื่อตั้งเป็นชื่อรายการ
+                    title = inputText.replace(amountMatch[0], '').trim();
+                    // ถ้าพิมพ์แต่เลข ไม่มีข้อความ ให้ตั้งชื่อว่า "รายจ่ายทั่วไป"
+                    if (title === "") title = "รายจ่ายทั่วไป";
+                } else {
+                    alert("กรุณาใส่ตัวเลขยอดเงินด้วยครับ (เช่น: กาแฟ 60)");
+                    return;
+                }
+
+                const newTx = {
+                    id: Date.now(),
+                    title: title,
+                    amount: amount,
+                    date: new Date().toISOString()
+                };
+
+                setTransactions([newTx, ...transactions]);
+                setInputText(""); // เคลียร์ช่องพิมพ์
+            };
+
+            const handleDelete = (id) => {
+                setTransactions(transactions.filter(t => t.id !== id));
+            };
+
+            const handleReset = () => {
+                if(confirm("คุณต้องการล้างข้อมูลทั้งหมดและตั้งค่าใหม่ใช่หรือไม่?")) {
+                    setIsSetup(false);
+                    setTransactions([]);
+                    setIncome(0); setSavings(0); setFixedBills(0);
+                }
+            }
+
+            // ==========================================
+            // หน้าจอต้อนรับ (Onboarding) - ไม่ปล่อยให้จอว่าง
+            // ==========================================
+            if (!isSetup) {
+                return (
+                    <div className="min-h-screen flex items-center justify-center p-4">
+                        <div className="bg-white max-w-md w-full p-8 rounded-3xl shadow-lg border border-gray-100">
+                            <div className="text-center mb-8">
+                                <div className="text-4xl mb-3">👋</div>
+                                <h1 className="text-2xl font-bold text-primary">ยินดีต้อนรับสู่ Smart Finance</h1>
+                                <p className="text-sm text-gray-500 mt-2">ตั้งค่าเพียง 3 ช่อง เพื่อให้แอป "คิดแทนคุณ"</p>
+                            </div>
+
+                            <div className="space-y-5">
+                                <div>
+                                    <label className="flex items-center text-sm font-semibold text-gray-700 mb-2">
+                                        <WalletIcon /><span className="ml-2">1. เงินเดือน/รายรับ (รวม)</span>
+                                    </label>
+                                    <input type="number" placeholder="เช่น 30000" 
+                                        className="w-full text-lg p-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-primary focus:border-transparent outline-none"
+                                        onChange={(e) => setIncome(Number(e.target.value))} />
+                                </div>
+                                <div>
+                                    <label className="flex items-center text-sm font-semibold text-gray-700 mb-2">
+                                        <TargetIcon /><span className="ml-2">2. หักเงินออมเป้าหมาย (ซ่อนไว้ก่อน)</span>
+                                    </label>
+                                    <input type="number" placeholder="เช่น 5000" 
+                                        className="w-full text-lg p-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-primary focus:border-transparent outline-none"
+                                        onChange={(e) => setSavings(Number(e.target.value))} />
+                                </div>
+                                <div>
+                                    <label className="flex items-center text-sm font-semibold text-gray-700 mb-2">
+                                        <BillIcon /><span className="ml-2">3. บิลคงที่ (ค่าห้อง, เน็ต, ผ่อนรถ)</span>
+                                    </label>
+                                    <input type="number" placeholder="เช่น 8000" 
+                                        className="w-full text-lg p-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-primary focus:border-transparent outline-none"
+                                        onChange={(e) => setFixedBills(Number(e.target.value))} />
+                                </div>
+                                
+                                <button 
+                                    onClick={() => {
+                                        if(income > 0) setIsSetup(true);
+                                        else alert("กรุณาระบุรายรับของคุณครับ");
+                                    }}
+                                    className="w-full mt-4 bg-primary text-white font-bold py-4 rounded-xl shadow-md hover:bg-[#0b474a] transition duration-200 text-lg">
+                                    🚀 เริ่มใช้งานเลย
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                );
+            }
+
+            // ==========================================
+            // หน้าจอหลัก (Dashboard)
+            // ==========================================
+            return (
+                <div className="max-w-lg mx-auto min-h-screen pb-20">
+                    
+                    {/* Header */}
+                    <div className="flex justify-between items-center p-5 pt-8">
+                        <div>
+                            <h2 className="text-xl font-bold text-gray-800 tracking-tight">สรุปยอดเดือนนี้</h2>
+                            <p className="text-xs text-gray-500 mt-1">วันที่ {stats.currentDay} / {stats.daysInMonth} (เหลืออีก {stats.daysLeft} วัน)</p>
+                        </div>
+                        <button onClick={() => setHideBalances(!hideBalances)} className="text-xs bg-gray-200 text-gray-700 px-3 py-1.5 rounded-full font-semibold">
+                            {hideBalances ? '👀 แสดงตัวเลข' : '🙈 ปิดบังตัวเลข'}
+                        </button>
+                    </div>
+
+                    {/* ✨ The "Safe-to-Spend" Card */}
+                    <div className="px-4 mb-6">
+                        <div className="bg-primary rounded-3xl p-6 shadow-[0_8px_30px_rgb(14,90,95,0.2)] text-white relative overflow-hidden">
+                            {/* Graphic background element */}
+                            <div className="absolute top-0 right-0 -mr-8 -mt-8 w-32 h-32 rounded-full bg-white opacity-10"></div>
+                            
+                            <p className="text-sm font-medium text-teal-100 mb-1">วันนี้คุณใช้เงินได้อีก (Safe-to-Spend)</p>
+                            <h1 className="text-5xl font-black mb-4 tracking-tight">
+                                {hideBalances ? '฿*,***' : formatMoney(Math.floor(stats.safeToSpend))}
+                            </h1>
+                            
+                            <div className="flex justify-between items-end border-t border-teal-600/50 pt-4 mt-2">
+                                <div>
+                                    <p className="text-xs text-teal-200">ยอดคงเหลือทั้งเดือน</p>
+                                    <p className="text-lg font-bold">{hideBalances ? '฿**,***' : formatMoney(stats.remainingTotal)}</p>
+                                </div>
+                                <div className="text-right">
+                                    <p className="text-xs text-teal-200">จ่ายไปแล้วรวม</p>
+                                    <p className="text-lg font-bold text-red-200">{hideBalances ? '฿*,***' : formatMoney(stats.totalSpent)}</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Insights (คำแนะนำแทนกราฟรกๆ) */}
+                    <div className="px-4 mb-6">
+                        <div className={`p-4 rounded-2xl border ${stats.safeToSpend > 300 ? 'bg-green-50 border-green-100' : 'bg-orange-50 border-orange-100'} flex items-start`}>
+                            <span className="text-xl mr-3">{stats.safeToSpend > 300 ? '🎉' : '⚠️'}</span>
+                            <p className="text-sm text-gray-700 font-medium leading-relaxed">
+                                {stats.safeToSpend > 300 
+                                    ? `เยี่ยมมาก! สถานะการเงินคุณปลอดภัย ถ้าวันนี้ใช้น้อยกว่าเป้า ยอดพรุ่งนี้จะทบเพิ่มขึ้นให้คุณชื่นใจ` 
+                                    : `ระวังนิดนึง ยอดใช้จ่ายต่อวันเริ่มตึงมือแล้ว ลองหาเมนูประหยัดทำกินเองสัก 2-3 วันจะช่วยกู้สถานการณ์ได้นะ!`}
+                            </p>
+                        </div>
+                    </div>
+
+                    {/* ✨ Zero-Click Logging (จดรายจ่ายด่วน) */}
+                    <div className="px-4 mb-8">
+                        <h3 className="text-sm font-bold text-gray-800 mb-3 px-1">จดรายจ่าย (พิมพ์ชื่อและราคาได้เลย)</h3>
+                        <form onSubmit={handleAddTransaction} className="relative shadow-sm">
+                            <input 
+                                type="text" 
+                                value={inputText}
+                                onChange={(e) => setInputText(e.target.value)}
+                                placeholder="เช่น: กินสุกี้ตี๋น้อย 219" 
+                                className="w-full bg-white text-gray-800 text-lg py-4 pl-5 pr-14 rounded-2xl border-none shadow-[0_2px_15px_rgba(0,0,0,0.04)] focus:ring-2 focus:ring-primary outline-none transition-all"
+                            />
+                            <button 
+                                type="submit"
+                                className="absolute right-2 top-2 bottom-2 bg-primary text-white p-3 rounded-xl hover:bg-[#0b474a] transition-colors flex items-center justify-center">
+                                <SendIcon />
+                            </button>
+                        </form>
+                    </div>
+
+                    {/* รายการใช้จ่ายล่าสุด */}
+                    <div className="px-4 mb-10">
+                        <div className="flex justify-between items-center mb-4 px-1">
+                            <h3 className="text-sm font-bold text-gray-800">รายจ่ายล่าสุด</h3>
+                            <span className="text-xs font-semibold text-gray-400 bg-gray-200 px-2 py-1 rounded-md">{transactions.length} รายการ</span>
+                        </div>
+                        
+                        {transactions.length === 0 ? (
+                            <div className="text-center py-10 bg-white rounded-2xl border border-gray-100 border-dashed">
+                                <p className="text-gray-400 text-sm">ยังไม่มีรายจ่ายเลย เยี่ยมมาก!</p>
+                            </div>
+                        ) : (
+                            <div className="space-y-3">
+                                {transactions.map(tx => (
+                                    <div key={tx.id} className="bg-white p-4 rounded-2xl shadow-sm border border-gray-50 flex justify-between items-center group">
+                                        <div className="flex items-center">
+                                            <div className="w-10 h-10 rounded-full bg-red-50 text-red-500 flex items-center justify-center mr-3 font-bold">
+                                                -
+                                            </div>
+                                            <div>
+                                                <p className="text-sm font-bold text-gray-800">{tx.title}</p>
+                                                <p className="text-xs text-gray-400 mt-0.5">
+                                                    {new Date(tx.date).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })} น.
+                                                </p>
+                                            </div>
+                                        </div>
+                                        <div className="flex items-center gap-3">
+                                            <p className="text-lg font-black text-gray-800">{hideBalances ? '***' : formatMoney(tx.amount)}</p>
+                                            <button onClick={() => handleDelete(tx.id)} className="opacity-0 group-hover:opacity-100 transition-opacity p-2 hover:bg-red-50 rounded-lg">
+                                                <TrashIcon />
+                                            </button>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Settings / Reset */}
+                    <div className="px-4 text-center mt-8">
+                        <button onClick={handleReset} className="text-xs text-gray-400 underline hover:text-red-500">
+                            ตั้งค่าเงินเดือน/เป้าหมายใหม่ (ล้างข้อมูล)
+                        </button>
+                    </div>
+
+                </div>
+            );
+        }
+
+        // 5. สั่งให้ React Render ลงบนหน้าจอ
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
